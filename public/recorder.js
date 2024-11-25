@@ -7,13 +7,13 @@ function initializeApp() {
     // Video Configurations with adaptive quality
     const VIDEO_CONFIG = {
         MOBILE: {
-            width: { ideal: 960 },
-            height: { ideal: 540 },
+            width: { ideal: 540 },
+            height: { ideal: 960 },
             frameRate: { ideal: 30 }
         },
         DESKTOP: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 720 },
+            height: { ideal: 1280 },
             frameRate: { ideal: 30 }
         }
     };
