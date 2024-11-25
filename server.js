@@ -17,7 +17,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// Cung cấp các file tĩnh trong thư mục 'public'
+// Cung cấp các file    tĩnh trong thư mục 'public'
 app.use(express.static('public'));
 
 // Ví dụ route khác
@@ -25,7 +25,7 @@ app.get('/', (req, res) => {
     res.send('Hello, World!');
 });
 
-// Khởi động server
+// Khởi động server node server.js
 app.listen(3000, () => {
     console.log('Server is running on http://localhost:3000');
 });
