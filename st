@@ -184,7 +184,7 @@ const recording = {
             const options = this.getOptions();
             state.recordedChunks = [];
 
-            const fps = 30;
+            const fps = 30;a
             const canvasStream = state.canvas.captureStream(fps);
 
             // Clone audio track để tránh conflict

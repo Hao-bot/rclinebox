@@ -4,32 +4,17 @@ const cors = require('cors');
 
 const app = express();
 
-// CORS configuration
-app.use(cors({
-    origin: '*',
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true,
-    optionsSuccessStatus: 204
-}));
+// CORS middleware
+app.use(cors());
+
+// Parse JSON bodies
+app.use(express.json());
 
 // Security headers middleware
 app.use((req, res, next) => {
-    // COOP, COEP headers for SharedArrayBuffer support
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-
-    // Additional security headers
-    res.setHeader('Permissions-Policy', 'camera=*, microphone=*');
-    res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-
-    // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
     res.setHeader('Access-Control-Allow-Headers', '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-
     next();
 });
 
@@ -45,14 +30,20 @@ app.use(express.static('public', {
     }
 }));
 
-// Default route
+// Handle all routes
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+// Error handler
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).send('Something broke!');
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
 });
 
 module.exports = app;
