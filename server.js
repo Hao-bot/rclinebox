@@ -1,6 +1,19 @@
-const express = require('express');
+
 const cors = require('cors');
+
+
+const express = require('express');
 const app = express();
+
+// Middleware để thêm COOP và COEP headers
+app.use((req, res, next) => {
+    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    next();
+});
+
+// Serve static files
+app.use(express.static('public'))
 
 // Sử dụng cors với tùy chỉnh các header cho Cross-Origin Isolation
 app.use(cors({
@@ -10,12 +23,6 @@ app.use(cors({
     credentials: true
 }));
 
-// Thêm các header Cross-Origin Isolation vào tất cả các yêu cầu
-app.use((req, res, next) => {
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');  // Bảo vệ trang khỏi các nguồn ngoài
-    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');  // Yêu cầu tài nguyên phải có CORP header hợp lệ
-    next();
-});
 
 // Cung cấp các file    tĩnh trong thư mục 'public'
 app.use(express.static('public'));
