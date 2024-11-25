@@ -1,37 +1,21 @@
 document.addEventListener('DOMContentLoaded', initializeApp);
 
 function initializeApp() {
-    // Constants
-    const MAX_RECORDING_TIME = 10; // Maximum recording time in seconds
+    const MAX_RECORDING_TIME = 10;
 
-    // Video Configurations with adaptive quality
     const VIDEO_CONFIG = {
-        MOBILE: {
-            width: { ideal: 540 },
-            height: { ideal: 960 },
-            frameRate: { ideal: 30 }
-        },
-        DESKTOP: {
-            width: { ideal: 720 },
-            height: { ideal: 1280 },
-            frameRate: { ideal: 30 }
-        }
+        width: { ideal: 540 },
+        height: { ideal: 960 },
+        frameRate: { ideal: 24 }
     };
 
-    // MIME Types with Priority and Fallbacks
-    const MIME_TYPES = {
-        PRIORITY: [
-            'video/mp4;codecs=h264,aac',
-            'video/mp4;codecs=avc1,mp4a.40.2',
-            'video/mp4',
-            'video/webm;codecs=h264,opus',
-            'video/webm;codecs=vp9,opus',
-            'video/webm;codecs=vp8,opus',
-            'video/webm'
-        ]
-    };
+    const MIME_TYPES = [
+        'video/mp4;codecs=h264,aac',
+        'video/webm;codecs=h264,opus',
+        'video/webm;codecs=vp9,opus',
+        'video/webm'
+    ];
 
-    // DOM Elements
     const elements = {
         previewVideo: document.getElementById('previewVideo'),
         startRecordingButton: document.getElementById('startRecordingButton'),
@@ -42,10 +26,8 @@ function initializeApp() {
         timerDisplay: document.getElementById('timerDisplay')
     };
 
-    // FFmpeg Instance
     let ffmpeg = null;
 
-    // State Management
     const state = {
         stream: null,
         mediaRecorder: null,
@@ -55,101 +37,53 @@ function initializeApp() {
         recordingTimer: null,
         recordingDuration: 0,
         recordedBlob: null,
-        isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
         canShare: !!(navigator.canShare && navigator.share)
     };
 
-    // FFmpeg Initialization
     const initializeFFmpeg = async () => {
         if (!ffmpeg) {
             const { createFFmpeg } = window.FFmpeg;
-            ffmpeg = createFFmpeg({ log: true });
-
-            try {
-                console.log('Loading FFmpeg...');
-                await ffmpeg.load();
-                console.log('FFmpeg loaded successfully.');
-            } catch (error) {
-                console.error('Failed to load FFmpeg:', error);
-                throw error;
-            }
+            ffmpeg = createFFmpeg({ log: false });
+            await ffmpeg.load();
         }
     };
 
-    // Convert WebM to MP4 using FFmpeg with proper orientation and aspect ratio
     const convertToMP4 = async (webmBlob) => {
         try {
             await initializeFFmpeg();
             const { fetchFile } = FFmpeg;
 
-            // Get video track settings
-            const videoEl = document.createElement('video');
-            videoEl.src = URL.createObjectURL(webmBlob);
-            await new Promise((resolve) => {
-                videoEl.onloadedmetadata = resolve;
-            });
-
-            const width = videoEl.videoWidth;
-            const height = videoEl.videoHeight;
-            URL.revokeObjectURL(videoEl.src);
-
-            // Write input file to FFmpeg virtual filesystem
             ffmpeg.FS('writeFile', 'input.webm', await fetchFile(webmBlob));
 
-            // Determine if we need to apply horizontal flip based on camera type
             const flipFilter = state.currentCamera === 'user' ? ',hflip' : '';
 
-            // Run FFmpeg conversion with proper filtering
             await ffmpeg.run(
                 '-i', 'input.webm',
-                '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease${flipFilter}`,
+                '-vf', `scale=540:960:force_original_aspect_ratio=decrease${flipFilter}`,
                 '-c:v', 'libx264',
-                '-preset', 'fast',
-                '-crf', '23',        // Balance quality and file size
+                '-preset', 'ultrafast',
+                '-crf', '28',
                 '-c:a', 'aac',
-                '-strict', 'experimental',
-                '-movflags', '+faststart',  // Enable web playback optimization
+                '-movflags', '+faststart',
                 'output.mp4'
             );
 
-            // Read the output file
             const mp4Data = ffmpeg.FS('readFile', 'output.mp4');
+            ffmpeg.FS('unlink', 'input.webm');
+            ffmpeg.FS('unlink', 'output.mp4');
 
-            // Create MP4 blob
             return new Blob([mp4Data.buffer], { type: 'video/mp4' });
         } catch (error) {
-            console.error('Error converting video:', error);
-            throw error;
-        } finally {
-            // Cleanup FFmpeg virtual filesystem
-            try {
-                ffmpeg.FS('unlink', 'input.webm');
-                ffmpeg.FS('unlink', 'output.mp4');
-            } catch (e) {
-                console.warn('Cleanup error:', e);
-            }
+            throw new Error('Conversion failed');
         }
     };
 
-    // Utility Functions
-    const utils = {
-        isBrowserSupported() {
-            return !!(
-                navigator.mediaDevices &&
-                navigator.mediaDevices.getUserMedia &&
-                window.MediaRecorder &&
-                document.createElement('video').canPlayType
-            );
-        },
-
-        async stopTracks(stream) {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
+    const stopTracks = (stream) => {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
         }
     };
 
-    // Timer Management
     const timer = {
         update() {
             const minutes = Math.floor(state.recordingDuration / 60);
@@ -178,272 +112,113 @@ function initializeApp() {
         }
     };
 
-    // Camera Management
     const camera = {
         async setup() {
             try {
-                if (!utils.isBrowserSupported()) {
-                    throw new Error('Browser not supported. Please use latest Chrome, Firefox, or Edge.');
-                }
-
-                await utils.stopTracks(state.stream);
+                await stopTracks(state.stream);
                 elements.previewVideo.srcObject = null;
-
-                const videoConfig = state.isMobile ? VIDEO_CONFIG.MOBILE : VIDEO_CONFIG.DESKTOP;
-
-                // Adaptive video configuration based on preview element
-                const previewRatio = elements.previewVideo.offsetWidth / elements.previewVideo.offsetHeight;
-                videoConfig.width = { ideal: elements.previewVideo.offsetWidth };
-                videoConfig.height = { ideal: Math.floor(elements.previewVideo.offsetWidth / previewRatio) };
 
                 const constraints = {
                     audio: {
                         echoCancellation: true,
-                        noiseSuppression: true,
-                        sampleRate: 44100
+                        noiseSuppression: true
                     },
                     video: {
-                        ...videoConfig,
-                        facingMode: { exact: state.currentCamera }
+                        ...VIDEO_CONFIG,
+                        facingMode: state.currentCamera
                     }
                 };
 
-                try {
-                    state.stream = await navigator.mediaDevices.getUserMedia(constraints);
-                } catch (exactError) {
-                    console.warn('Exact constraint failed, trying without exact:', exactError);
-                    constraints.video.facingMode = state.currentCamera;
-                    state.stream = await navigator.mediaDevices.getUserMedia(constraints);
-                }
-
-                if (!state.stream.getVideoTracks().length) {
-                    throw new Error('No video track available');
-                }
-
+                state.stream = await navigator.mediaDevices.getUserMedia(constraints);
                 elements.previewVideo.srcObject = state.stream;
                 elements.previewVideo.style.transform = state.currentCamera === 'user' ? 'scaleX(-1)' : 'none';
                 await elements.previewVideo.play();
 
-                ui.updateStatus('Camera ready');
-                ui.enableButtons();
+                elements.startRecordingButton.disabled = false;
+                elements.switchCameraButton.disabled = false;
             } catch (err) {
-                console.error('Camera setup failed:', err);
-                ui.updateStatus(`Camera Error: ${err.message}`);
-                ui.disableButtons();
+                elements.statusMessage.textContent = 'Camera error';
+                elements.startRecordingButton.disabled = true;
+                elements.switchCameraButton.disabled = true;
             }
         },
 
         async switch() {
             if (state.isRecording) return;
 
-            try {
-                await utils.stopTracks(state.stream);
-                state.currentCamera = state.currentCamera === 'user' ? 'environment' : 'user';
-                await this.setup();
-            } catch (error) {
-                console.error('Camera switch failed:', error);
-                ui.updateStatus(`Switch camera error: ${error.message}`);
-
-                // Try reverting to previous camera
-                if (state.currentCamera === 'environment') {
-                    state.currentCamera = 'user';
-                    await this.setup();
-                }
-            }
+            await stopTracks(state.stream);
+            state.currentCamera = state.currentCamera === 'user' ? 'environment' : 'user';
+            await this.setup();
         }
     };
 
-    // Recording Management
     const recording = {
-        videoProcessor: null,
-
-        async setupVideoProcessor() {
-            const videoTrack = state.stream.getVideoTracks()[0];
-            const { width, height } = videoTrack.getSettings();
-
-            // Create processing canvas with correct dimensions
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = width;
-            canvas.height = height;
-
-            // Create a video element for processing
-            const videoEl = document.createElement('video');
-            videoEl.autoplay = true;
-            videoEl.muted = true;
-            videoEl.srcObject = state.stream;
-            await videoEl.play();
-
-            // Setup canvas processor
-            this.videoProcessor = {
-                canvas,
-                ctx,
-                videoEl,
-                width,
-                height,
-                process: () => {
-                    ctx.save();
-
-                    // Clear canvas
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                    // Handle mirroring based on camera type
-                    if (state.currentCamera === 'user') {
-                        ctx.scale(-1, 1);
-                        ctx.translate(-canvas.width, 0);
-                    }
-
-                    // Draw video frame
-                    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-
-                    ctx.restore();
-                }
-            };
-        },
-
         async start() {
             try {
                 state.recordedChunks = [];
                 state.recordedBlob = null;
-                ui.disableDownloadShare();
+                elements.downloadButton.disabled = true;
+                elements.shareButton.disabled = true;
 
-                // Get video track constraints
-                const videoTrack = state.stream.getVideoTracks()[0];
-                const { width, height } = videoTrack.getSettings();
-                console.log('Video settings:', { width, height });
+                const mimeType = MIME_TYPES.find(type => MediaRecorder.isTypeSupported(type));
+                if (!mimeType) throw new Error('No supported format');
 
-                const mimeType = MIME_TYPES.PRIORITY.find(type => MediaRecorder.isTypeSupported(type));
-                if (!mimeType) {
-                    throw new Error('No supported video format found');
-                }
-
-                const options = {
+                state.mediaRecorder = new MediaRecorder(state.stream, {
                     mimeType,
-                    videoBitsPerSecond: 2500000,
+                    videoBitsPerSecond: 2000000,
                     audioBitsPerSecond: 128000
-                };
-
-                // Use original stream for recording
-                state.mediaRecorder = new MediaRecorder(state.stream, options);
+                });
 
                 state.mediaRecorder.ondataavailable = (event) => {
-                    if (event.data && event.data.size > 0) {
+                    if (event.data?.size > 0) {
                         state.recordedChunks.push(event.data);
                     }
                 };
 
                 state.mediaRecorder.onstop = async () => {
                     try {
-                        // First create WebM blob from recorded chunks
                         const webmBlob = new Blob(state.recordedChunks, { type: 'video/webm' });
-
-                        // Update status to show conversion progress
-                        ui.updateStatus('Converting video format...');
-
-                        // Convert WebM to MP4
                         state.recordedBlob = await convertToMP4(webmBlob);
 
-                        ui.enableDownloadShare();
-                        ui.updateStatus('Video ready for download or share');
-                    } catch (error) {
-                        console.error('Video processing error:', error);
-                        ui.updateStatus(`Video processing error: ${error.message}`);
+                        elements.downloadButton.disabled = false;
+                        elements.shareButton.disabled = !state.canShare;
+                    } catch {
+                        elements.statusMessage.textContent = 'Processing failed';
                     }
                 };
 
-                // Start recording and canvas processing
                 state.mediaRecorder.start(1000);
-
-                // Start canvas processing loop
-                const processFrame = () => {
-                    if (state.isRecording) {
-                        this.videoProcessor.process();
-                        requestAnimationFrame(processFrame);
-                    }
-                };
-                processFrame();
-
                 timer.start();
                 state.isRecording = true;
-                ui.updateRecordingState();
-                ui.updateStatus('Recording... (max 10 seconds)');
-
-            } catch (err) {
-                console.error('Recording start failed:', err);
-                ui.updateStatus(`Error: ${err.message}`);
+                elements.startRecordingButton.textContent = 'Stop Recording';
+                elements.switchCameraButton.disabled = true;
+                elements.statusMessage.textContent = 'Recording...';
+            } catch {
+                elements.statusMessage.textContent = 'Recording failed';
             }
         },
 
         stop() {
-            if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+            if (state.mediaRecorder?.state !== 'inactive') {
                 state.mediaRecorder.stop();
                 timer.stop();
                 state.isRecording = false;
-                ui.updateRecordingState();
-                ui.updateStatus('Processing video...');
-
-                // Cleanup video processor
-                if (this.videoProcessor) {
-                    this.videoProcessor.videoEl.srcObject = null;
-                    this.videoProcessor = null;
-                }
+                elements.startRecordingButton.textContent = 'Start Recording';
+                elements.switchCameraButton.disabled = false;
+                elements.statusMessage.textContent = 'Processing...';
             }
         }
     };
 
-    // UI Management
-    const ui = {
-        initialize() {
-            elements.switchCameraButton.style.display = state.isMobile ? 'block' : 'none';
-            elements.shareButton.style.display = state.canShare ? 'block' : 'none';
-            this.disableDownloadShare();
-        },
-
-        updateStatus(message) {
-            elements.statusMessage.textContent = message;
-        },
-
-        updateRecordingState() {
-            elements.startRecordingButton.textContent = state.isRecording ? 'Stop Recording' : 'Start Recording';
-            elements.switchCameraButton.disabled = state.isRecording;
-        },
-
-        enableButtons() {
-            elements.startRecordingButton.disabled = false;
-            elements.switchCameraButton.disabled = false;
-        },
-
-        disableButtons() {
-            elements.startRecordingButton.disabled = true;
-            elements.switchCameraButton.disabled = true;
-        },
-
-        enableDownloadShare() {
-            elements.downloadButton.disabled = false;
-            elements.shareButton.disabled = !state.canShare;
-        },
-
-        disableDownloadShare() {
-            elements.downloadButton.disabled = true;
-            elements.shareButton.disabled = true;
-        }
-    };
-
-    // Video Export
     const videoExport = {
         download() {
             if (state.recordedBlob) {
                 const url = URL.createObjectURL(state.recordedBlob);
                 const a = document.createElement('a');
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
                 a.href = url;
-                a.download = `video-${timestamp}.mp4`;
-                document.body.appendChild(a);
+                a.download = `video-${Date.now()}.mp4`;
                 a.click();
-                setTimeout(() => {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                }, 100);
+                URL.revokeObjectURL(url);
             }
         },
 
@@ -451,33 +226,24 @@ function initializeApp() {
             if (!state.recordedBlob || !state.canShare) return;
 
             try {
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                const file = new File([state.recordedBlob], `video-${timestamp}.mp4`, {
+                const file = new File([state.recordedBlob], `video-${Date.now()}.mp4`, {
                     type: 'video/mp4'
                 });
 
                 if (navigator.canShare({ files: [file] })) {
                     await navigator.share({
                         files: [file],
-                        title: 'Recorded Video',
-                        text: 'Video recorded from web app'
+                        title: 'Recorded Video'
                     });
-                    ui.updateStatus('Video shared successfully');
-                } else {
-                    ui.updateStatus('Device does not support file sharing');
                 }
             } catch (error) {
-                if (error.name === 'AbortError') {
-                    ui.updateStatus('Sharing cancelled');
-                } else {
-                    console.error('Share failed:', error);
-                    ui.updateStatus(`Share error: ${error.message}`);
+                if (error.name !== 'AbortError') {
+                    elements.statusMessage.textContent = 'Share failed';
                 }
             }
         }
     };
 
-    // Event Listeners
     elements.startRecordingButton.addEventListener('click', () => {
         if (state.isRecording) {
             recording.stop();
@@ -490,15 +256,17 @@ function initializeApp() {
     elements.downloadButton.addEventListener('click', () => videoExport.download());
     elements.shareButton.addEventListener('click', () => videoExport.share());
 
-    // Initialize Application
+    elements.switchCameraButton.style.display = 'block';
+    elements.shareButton.style.display = state.canShare ? 'block' : 'none';
+    elements.downloadButton.disabled = true;
+    elements.shareButton.disabled = true;
+
     (async () => {
         try {
             await initializeFFmpeg();
-            ui.initialize();
             await camera.setup();
-        } catch (error) {
-            console.error('Initialization error:', error);
-            ui.updateStatus(`Initialization error: ${error.message}`);
+        } catch {
+            elements.statusMessage.textContent = 'Initialization failed';
         }
     })();
 }
