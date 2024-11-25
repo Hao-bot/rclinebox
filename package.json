@@ -3,5 +3,9 @@
     "@ffmpeg/ffmpeg": "^0.12.10",
     "cors": "^2.8.5",
     "express": "^4.21.1"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "build": "npm run build:frontend"
   }
 }
