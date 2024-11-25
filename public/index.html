@@ -30,16 +30,10 @@
   </div>
 </div>
 
-<!-- Load FFmpeg with integrity and crossorigin -->
-<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"
-        crossorigin="anonymous"
-        integrity="sha384-[hash]"></script>
-
-<!-- Your scripts -->
-<script src="recorder.js" defer></script>
-
-<!-- Analytics (optional) -->
+<!-- Import JavaScript -->
 <script defer src="/_vercel/insights/script.js"></script>
-<title>Video Recorder</title>
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+
+<script type="module" src="recorder.js"></script>
 </body>
 </html>
