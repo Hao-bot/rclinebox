@@ -8,47 +8,17 @@
   ],
   "routes": [
     {
-      "src": "/assets/(.*)",
-      "headers": {
-        "Cross-Origin-Resource-Policy": "cross-origin",
-        "Access-Control-Allow-Origin": "*"
-      },
-      "continue": true
-    },
-    {
       "src": "/(.*)",
-      "dest": "server.js",
       "headers": {
-        "Cross-Origin-Embedder-Policy": "require-corp",
+        "Content-Security-Policy": "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:; connect-src 'self' https: wss: blob:; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; worker-src 'self' blob:;",
+        "Cross-Origin-Embedder-Policy": "credentialless",
         "Cross-Origin-Opener-Policy": "same-origin",
-        "Cross-Origin-Resource-Policy": "cross-origin",
+        "Cross-Origin-Resource-Policy": "same-site",
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
-        "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept"
-      }
-    }
-  ],
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "Cross-Origin-Embedder-Policy",
-          "value": "require-corp"
-        },
-        {
-          "key": "Cross-Origin-Opener-Policy",
-          "value": "same-origin"
-        },
-        {
-          "key": "Cross-Origin-Resource-Policy",
-          "value": "cross-origin"
-        },
-        {
-          "key": "Access-Control-Allow-Origin",
-          "value": "*"
-        }
-      ]
+        "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+        "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, Accept"
+      },
+      "dest": "server.js"
     }
   ]
 }
