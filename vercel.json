@@ -1,15 +1,13 @@
 {
-  "version": 2,
-  "builds": [
+  "headers": [
     {
-      "src": "server.js",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "server.js"
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://vercel.live https://rclinebox.vercel.app; style-src 'self' 'unsafe-inline' https://vercel.live; img-src 'self' https://rclinebox.vercel.app;"
+        }
+      ]
     }
   ]
 }
