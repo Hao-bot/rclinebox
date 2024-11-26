@@ -55,30 +55,46 @@ function initializeApp() {
         }
     };
 
-    // Convert WebM to MP4 with timeout
     const convertToMP4 = async (webmBlob) => {
         const { fetchFile } = FFmpeg;
         try {
+            const timeoutDuration = state.isMobile ? 40000 : 10000; // 40s cho mobile
+
             const conversionWithTimeout = Promise.race([
                 (async () => {
                     ffmpeg.FS("writeFile", "input.webm", await fetchFile(webmBlob));
 
-                    await ffmpeg.run(
-                        "-i", "input.webm",
-                        "-c:v", "libx264",
-                        "-preset", "ultrafast",
-                        "-crf", "28",
-                        "-c:a", "aac",
-                        "-b:a", "128k",
-                        "output.mp4"
-                    );
+                    // Tối ưu command cho mobile
+                    if (state.isMobile) {
+                        await ffmpeg.run(
+                            "-i", "input.webm",
+                            "-c:v", "libx264",
+                            "-preset", "ultrafast",
+                            "-crf", "30",
+                            "-vf", "scale=640:-2", // Giảm resolution
+                            "-c:a", "aac",
+                            "-b:a", "96k",
+                            "-movflags", "+faststart",
+                            "output.mp4"
+                        );
+                    } else {
+                        await ffmpeg.run(
+                            "-i", "input.webm",
+                            "-c:v", "libx264",
+                            "-preset", "ultrafast",
+                            "-crf", "28",
+                            "-c:a", "aac",
+                            "-b:a", "128k",
+                            "output.mp4"
+                        );
+                    }
 
                     const mp4Data = ffmpeg.FS("readFile", "output.mp4");
                     return new Blob([mp4Data.buffer], { type: "video/mp4" });
                 })(),
                 new Promise((_, reject) => setTimeout(() => {
-                    reject(new Error('Video processing timeout after 10 seconds'));
-                }, 10000))
+                    reject(new Error('Video processing timeout after ' + (timeoutDuration/1000) + ' seconds'));
+                }, timeoutDuration))
             ]);
 
             return await conversionWithTimeout;
@@ -121,7 +137,6 @@ function initializeApp() {
         },
     };
 
-    // Camera Setup
     const setupCamera = async () => {
         const config = state.isMobile ? VIDEO_CONFIG.MOBILE : VIDEO_CONFIG.DESKTOP;
         const constraints = {
@@ -132,11 +147,25 @@ function initializeApp() {
             if (state.stream) {
                 state.stream.getTracks().forEach((track) => track.stop());
             }
+
             state.stream = await navigator.mediaDevices.getUserMedia(constraints);
             elements.previewVideo.srcObject = state.stream;
             elements.previewVideo.style.transform =
                 state.currentCamera === "user" ? "scale(-1, 1)" : "scale(1, 1)";
-            await elements.previewVideo.play();
+
+            // Đợi video load
+            await new Promise((resolve) => {
+                elements.previewVideo.onloadedmetadata = () => {
+                    elements.previewVideo.play().then(resolve);
+                };
+            });
+
+            // Reset canvas khi switch camera
+            if (recording.canvas) {
+                recording.canvas = null;
+                recording.ctx = null;
+            }
+
             updateStatus("Camera ready");
         } catch (error) {
             console.error("Camera setup error:", error);
@@ -209,7 +238,6 @@ function initializeApp() {
                         updateStatus("Processing video...");
                         elements.startRecordingButton.disabled = true;
                         updateUIState();
-
                         const webmBlob = new Blob(state.recordedChunks, { type: "video/webm" });
                         state.recordedBlob = await convertToMP4(webmBlob);
                         state.hasDownloaded = false;
@@ -274,7 +302,7 @@ function initializeApp() {
                 const url = URL.createObjectURL(state.recordedBlob);
                 const link = document.createElement("a");
                 link.href = url;
-                link.download = `video-${Date.now()}.mp4`;
+                link.download = `video-${Date.now()}.mp4`;  // Luôn là .mp4
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -288,7 +316,7 @@ function initializeApp() {
             if (state.canShare && state.recordedBlob) {
                 try {
                     const file = new File([state.recordedBlob], `video-${Date.now()}.mp4`, {
-                        type: "video/mp4",
+                        type: "video/mp4"  // Luôn là video/mp4
                     });
                     await navigator.share({ files: [file], title: "Recorded Video" });
                     updateStatus("Video shared successfully");
@@ -299,7 +327,7 @@ function initializeApp() {
                     }
                 }
             }
-        },
+        }
     };
 
     // Event Listeners with Debounce
