@@ -1,272 +1,297 @@
-document.addEventListener('DOMContentLoaded', initializeApp);
+document.addEventListener("DOMContentLoaded", initializeApp);
 
 function initializeApp() {
-    const MAX_RECORDING_TIME = 10;
-
+    // Constants
+    const MAX_RECORDING_TIME = 10; // Maximum recording time in seconds
     const VIDEO_CONFIG = {
-        width: { ideal: 540 },
-        height: { ideal: 960 },
-        frameRate: { ideal: 24 }
+        MOBILE: { width: { ideal: 540 }, height: { ideal: 960 }, frameRate: { ideal: 30 } },
+        DESKTOP: { width: { ideal: 720 }, height: { ideal: 1280 }, frameRate: { ideal: 30 } },
+    };
+    const MIME_TYPES = {
+        PRIORITY: [
+            "video/mp4;codecs=h264,aac",
+            "video/mp4;codecs=avc1,mp4a.40.2",
+            "video/mp4",
+            "video/webm;codecs=vp9,opus",
+            "video/webm;codecs=vp8,opus",
+            "video/webm",
+        ],
     };
 
-    const MIME_TYPES = [
-        'video/mp4;codecs=h264,aac',
-        'video/webm;codecs=h264,opus',
-        'video/webm;codecs=vp9,opus',
-        'video/webm'
-    ];
-
+    // DOM Elements
     const elements = {
-        previewVideo: document.getElementById('previewVideo'),
-        startRecordingButton: document.getElementById('startRecordingButton'),
-        switchCameraButton: document.getElementById('switchCameraButton'),
-        downloadButton: document.getElementById('downloadButton'),
-        shareButton: document.getElementById('shareButton'),
-        statusMessage: document.getElementById('statusMessage'),
-        timerDisplay: document.getElementById('timerDisplay')
+        previewVideo: document.getElementById("previewVideo"),
+        startRecordingButton: document.getElementById("startRecordingButton"),
+        switchCameraButton: document.getElementById("switchCameraButton"),
+        downloadButton: document.getElementById("downloadButton"),
+        shareButton: document.getElementById("shareButton"),
+        timerDisplay: document.getElementById("timerDisplay"),
     };
 
-    let ffmpeg = null;
-
+    // State
     const state = {
         stream: null,
         mediaRecorder: null,
         recordedChunks: [],
         isRecording: false,
-        currentCamera: 'user',
-        recordingTimer: null,
-        recordingDuration: 0,
+        currentCamera: "user",
         recordedBlob: null,
-        canShare: !!(navigator.canShare && navigator.share)
+        hasDownloaded: false,
+        isMobile: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
+        canShare: !!(navigator.canShare && navigator.share),
     };
 
+    // FFmpeg Instance
+    let ffmpeg = null;
+
+    // Initialize FFmpeg
     const initializeFFmpeg = async () => {
         if (!ffmpeg) {
-            const { createFFmpeg } = window.FFmpeg;
-            ffmpeg = createFFmpeg({ log: false });
+            const { createFFmpeg, fetchFile } = FFmpeg;
+            ffmpeg = createFFmpeg({ log: true });
             await ffmpeg.load();
         }
     };
 
+    // Convert WebM to MP4
     const convertToMP4 = async (webmBlob) => {
+        const { fetchFile } = FFmpeg;
         try {
-            await initializeFFmpeg();
-            const { fetchFile } = FFmpeg;
+            //await initializeFFmpeg();
 
-            ffmpeg.FS('writeFile', 'input.webm', await fetchFile(webmBlob));
+            // Write WebM to FFmpeg FS
+            ffmpeg.FS("writeFile", "input.webm", await fetchFile(webmBlob));
 
-            const flipFilter = state.currentCamera === 'user' ? ',hflip' : '';
-
+            // Conversion command
             await ffmpeg.run(
-                '-i', 'input.webm',
-                '-vf', `scale=540:960:force_original_aspect_ratio=decrease${flipFilter}`,
-                '-c:v', 'libx264',
-                '-preset', 'ultrafast',
-                '-crf', '28',
-                '-c:a', 'aac',
-                '-movflags', '+faststart',
-                'output.mp4'
+                "-i",
+                "input.webm",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-crf",
+                "28",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-movflags",
+                "+faststart",
+                "output.mp4"
             );
 
-            const mp4Data = ffmpeg.FS('readFile', 'output.mp4');
-            ffmpeg.FS('unlink', 'input.webm');
-            ffmpeg.FS('unlink', 'output.mp4');
-
-            return new Blob([mp4Data.buffer], { type: 'video/mp4' });
+            // Read the output MP4
+            const mp4Data = ffmpeg.FS("readFile", "output.mp4");
+            return new Blob([mp4Data.buffer], { type: "video/mp4" });
         } catch (error) {
-            throw new Error('Conversion failed');
+            console.error("Error converting video:", error);
+            throw error;
+        } finally {
+            // Clean up FS
+            ffmpeg.FS("unlink", "input.webm");
+            ffmpeg.FS("unlink", "output.mp4");
         }
     };
 
-    const stopTracks = (stream) => {
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-        }
-    };
-
+    // Timer Utility
     const timer = {
-        update() {
-            const minutes = Math.floor(state.recordingDuration / 60);
-            const seconds = state.recordingDuration % 60;
-            elements.timerDisplay.textContent =
-                `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-        },
-
+        interval: null,
+        seconds: 0,
         start() {
-            state.recordingDuration = 0;
-            this.update();
-            state.recordingTimer = setInterval(() => {
-                state.recordingDuration++;
-                this.update();
-                if (state.recordingDuration >= MAX_RECORDING_TIME) {
-                    recording.stop();
-                }
+            this.seconds = 0;
+            elements.timerDisplay.textContent = `${this.seconds}s`;
+            this.interval = setInterval(() => {
+                this.seconds++;
+                elements.timerDisplay.textContent = `${this.seconds}s`;
+                if (this.seconds >= MAX_RECORDING_TIME) recording.stop();
             }, 1000);
         },
-
         stop() {
-            if (state.recordingTimer) {
-                clearInterval(state.recordingTimer);
-                state.recordingTimer = null;
-            }
-        }
+            clearInterval(this.interval);
+            elements.timerDisplay.textContent = "0s";
+        },
     };
 
-    const camera = {
-        async setup() {
-            try {
-                await stopTracks(state.stream);
-                elements.previewVideo.srcObject = null;
-
-                const constraints = {
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true
-                    },
-                    video: {
-                        ...VIDEO_CONFIG,
-                        facingMode: state.currentCamera
-                    }
-                };
-
-                state.stream = await navigator.mediaDevices.getUserMedia(constraints);
-                elements.previewVideo.srcObject = state.stream;
-                elements.previewVideo.style.transform = state.currentCamera === 'user' ? 'scaleX(-1)' : 'none';
-                await elements.previewVideo.play();
-
-                elements.startRecordingButton.disabled = false;
-                elements.switchCameraButton.disabled = false;
-            } catch (err) {
-                elements.statusMessage.textContent = 'Camera error';
-                elements.startRecordingButton.disabled = true;
-                elements.switchCameraButton.disabled = true;
+    // Camera Setup
+    const setupCamera = async () => {
+        const config = state.isMobile ? VIDEO_CONFIG.MOBILE : VIDEO_CONFIG.DESKTOP;
+        const constraints = {
+            video: { ...config, facingMode: state.currentCamera },
+            audio: { echoCancellation: true, noiseSuppression: true },
+        };
+        try {
+            if (state.stream) {
+                state.stream.getTracks().forEach((track) => track.stop());
             }
-        },
+            state.stream = await navigator.mediaDevices.getUserMedia(constraints);
+            elements.previewVideo.srcObject = state.stream;
 
-        async switch() {
-            if (state.isRecording) return;
+            // Remove mirror effect for front camera
+            elements.previewVideo.style.transform =
+                state.currentCamera === "user" ? "scale(-1, 1)" : "scale(1, 1)";
 
-            await stopTracks(state.stream);
-            state.currentCamera = state.currentCamera === 'user' ? 'environment' : 'user';
-            await this.setup();
+            elements.previewVideo.play();
+        } catch (error) {
+            console.error("Camera setup error:", error);
         }
     };
 
     const recording = {
-        async start() {
-            try {
-                state.recordedChunks = [];
-                state.recordedBlob = null;
-                elements.downloadButton.disabled = true;
-                elements.shareButton.disabled = true;
+        canvas: null,
+        ctx: null,
+        canvasStream: null,
 
-                const mimeType = MIME_TYPES.find(type => MediaRecorder.isTypeSupported(type));
-                if (!mimeType) throw new Error('No supported format');
+        setupCanvas() {
+            if (!this.canvas) {
+                this.canvas = document.createElement("canvas");
+                this.ctx = this.canvas.getContext("2d");
 
-                state.mediaRecorder = new MediaRecorder(state.stream, {
-                    mimeType,
-                    videoBitsPerSecond: 2000000,
-                    audioBitsPerSecond: 128000
-                });
-
-                state.mediaRecorder.ondataavailable = (event) => {
-                    if (event.data?.size > 0) {
-                        state.recordedChunks.push(event.data);
-                    }
-                };
-
-                state.mediaRecorder.onstop = async () => {
-                    try {
-                        const webmBlob = new Blob(state.recordedChunks, { type: 'video/webm' });
-                        state.recordedBlob = await convertToMP4(webmBlob);
-
-                        elements.downloadButton.disabled = false;
-                        elements.shareButton.disabled = !state.canShare;
-                    } catch {
-                        elements.statusMessage.textContent = 'Processing failed';
-                    }
-                };
-
-                state.mediaRecorder.start(1000);
-                timer.start();
-                state.isRecording = true;
-                elements.startRecordingButton.textContent = 'Stop Recording';
-                elements.switchCameraButton.disabled = true;
-                elements.statusMessage.textContent = 'Recording...';
-            } catch {
-                elements.statusMessage.textContent = 'Recording failed';
+                this.canvas.width = elements.previewVideo.videoWidth;
+                this.canvas.height = elements.previewVideo.videoHeight;
             }
+        },
+
+        processFrame() {
+            if (!this.ctx || !state.stream) return;
+
+            // Clear canvas
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+            // Flip the frame for front camera
+            if (state.currentCamera === "user") {
+                this.ctx.save();
+                this.ctx.scale(-1, 1); // Flip horizontally
+                this.ctx.translate(-this.canvas.width, 0);
+            }
+
+            // Draw the video frame
+            this.ctx.drawImage(
+                elements.previewVideo,
+                0,
+                0,
+                this.canvas.width,
+                this.canvas.height
+            );
+
+            // Restore context if flipped
+            if (state.currentCamera === "user") {
+                this.ctx.restore();
+            }
+        },
+
+        async start() {
+            this.setupCanvas();
+
+            // Create canvas stream for recording
+            this.canvasStream = this.canvas.captureStream(30); // 30 FPS
+            const combinedStream = new MediaStream([
+                ...this.canvasStream.getVideoTracks(),
+                ...state.stream.getAudioTracks(),
+            ]);
+
+            state.recordedChunks = [];
+            const mimeType = MIME_TYPES.PRIORITY.find((type) =>
+                MediaRecorder.isTypeSupported(type)
+            );
+            if (!mimeType) throw new Error("No supported format found");
+
+            state.mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
+            state.mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) state.recordedChunks.push(e.data);
+            };
+
+            state.mediaRecorder.onstop = async () => {
+                const webmBlob = new Blob(state.recordedChunks, { type: "video/webm" });
+                state.recordedBlob = await convertToMP4(webmBlob);
+                state.hasDownloaded = false;
+                updateUIState();
+            };
+
+            // Start recording and drawing frames
+            state.mediaRecorder.start(1000);
+            timer.start();
+            state.isRecording = true;
+            updateUIState();
+
+            const drawLoop = () => {
+                if (state.isRecording) {
+                    this.processFrame();
+                    requestAnimationFrame(drawLoop);
+                }
+            };
+            drawLoop();
         },
 
         stop() {
-            if (state.mediaRecorder?.state !== 'inactive') {
+            if (state.mediaRecorder) {
                 state.mediaRecorder.stop();
-                timer.stop();
-                state.isRecording = false;
-                elements.startRecordingButton.textContent = 'Start Recording';
-                elements.switchCameraButton.disabled = false;
-                elements.statusMessage.textContent = 'Processing...';
             }
-        }
+            if (this.canvasStream) {
+                this.canvasStream.getTracks().forEach((track) => track.stop());
+            }
+            timer.stop();
+            state.isRecording = false;
+            updateUIState();
+        },
     };
 
-    const videoExport = {
+
+    // Update UI State
+    const updateUIState = () => {
+        elements.startRecordingButton.textContent = state.isRecording ? "Stop" : "Start Recording";
+        elements.switchCameraButton.disabled = state.isRecording || !state.isMobile;
+        elements.downloadButton.disabled = !state.recordedBlob || state.hasDownloaded;
+        elements.shareButton.disabled = !state.recordedBlob || !state.canShare;
+    };
+
+    const updateUIAfterRecording = () => {
+        updateUIState();
+        elements.timerDisplay.textContent = "Recording Stopped";
+    };
+
+    // Export Functions
+    const exportVideo = {
         download() {
             if (state.recordedBlob) {
                 const url = URL.createObjectURL(state.recordedBlob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `video-${Date.now()}.mp4`;
-                a.click();
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `video-${Date.now()}.mp4`;
+                link.click();
                 URL.revokeObjectURL(url);
+
+                state.hasDownloaded = true; // Mark as downloaded
+                updateUIState(); // Update button state
             }
         },
-
         async share() {
-            if (!state.recordedBlob || !state.canShare) return;
-
-            try {
-                const file = new File([state.recordedBlob], `video-${Date.now()}.mp4`, {
-                    type: 'video/mp4'
+            if (state.canShare && state.recordedBlob) {
+                const file = new File([state.recordedBlob], `video.mp4`, {
+                    type: "video/mp4",
                 });
-
-                if (navigator.canShare({ files: [file] })) {
-                    await navigator.share({
-                        files: [file],
-                        title: 'Recorded Video'
-                    });
-                }
-            } catch (error) {
-                if (error.name !== 'AbortError') {
-                    elements.statusMessage.textContent = 'Share failed';
-                }
+                await navigator.share({ files: [file], title: "Recorded Video" });
             }
-        }
+        },
     };
 
-    elements.startRecordingButton.addEventListener('click', () => {
-        if (state.isRecording) {
-            recording.stop();
-        } else {
-            recording.start();
-        }
+    // Event Listeners
+    elements.startRecordingButton.addEventListener("click", () => {
+        if (state.isRecording) recording.stop();
+        else recording.start();
     });
+    elements.switchCameraButton.addEventListener("click", async () => {
+        state.currentCamera = state.currentCamera === "user" ? "environment" : "user";
+        await setupCamera();
+    });
+    elements.downloadButton.addEventListener("click", exportVideo.download);
+    elements.shareButton.addEventListener("click", exportVideo.share);
 
-    elements.switchCameraButton.addEventListener('click', () => camera.switch());
-    elements.downloadButton.addEventListener('click', () => videoExport.download());
-    elements.shareButton.addEventListener('click', () => videoExport.share());
-
-    elements.switchCameraButton.style.display = 'block';
-    elements.shareButton.style.display = state.canShare ? 'block' : 'none';
-    elements.downloadButton.disabled = true;
-    elements.shareButton.disabled = true;
-
+    // Initialize App
     (async () => {
-        try {
-            await initializeFFmpeg();
-            await camera.setup();
-        } catch {
-            elements.statusMessage.textContent = 'Initialization failed';
-        }
+        await initializeFFmpeg();
+        await setupCamera();
+        if (!state.isMobile) elements.switchCameraButton.style.display = "none"; // Hide switch camera button on PC
+        updateUIState();
     })();
 }
